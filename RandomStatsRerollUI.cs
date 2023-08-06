@@ -10,6 +10,7 @@ using Terraria.ModLoader;
 using Terraria;
 using Terraria.UI;
 using Terraria.UI.Chat;
+using Terraria.Chat;
 
 namespace RandomStats
 {
@@ -91,14 +92,18 @@ namespace RandomStats
                 return;
             }
 
-            int awesomePrice = Item.buyPrice(0, 1, 0, 0);
+            // TODO - Implement configurable option to set reforge price of sellprice * scale
+            int reforgePrice = _vanillaItemSlot.Item.value;
             string costText = Language.GetTextValue("LegacyInterface.46") + ": ";
-            int[] coins = Utils.CoinsSplit(awesomePrice);
+            int[] coins = Utils.CoinsSplit(reforgePrice);
             var coinsText = new StringBuilder();
 
             for (int i = 0; i < 4; i++)
             {
-                coinsText.Append($"[c/{Colors.AlphaDarken(Colors.CoinPlatinum).Hex3()}:{coins[3 - i]} {Language.GetTextValue($"LegacyInterface.{15 + i}")}]");
+                if (coins[3 - i] != 0)
+                {
+                    coinsText.Append($"[c/{Colors.AlphaDarken(Colors.CoinPlatinum).Hex3()}:{coins[3 - i]} {Language.GetTextValue($"LegacyInterface.{15 + i}")}]");
+                }
             }
 
             ItemSlot.DrawSavings(Main.spriteBatch, SlotX + 130, Main.instance.invBottom, true);
@@ -129,18 +134,17 @@ namespace RandomStats
             tickPlayed = true;
             Main.LocalPlayer.mouseInterface = true;
 
-            if (!Main.mouseLeftRelease || !Main.mouseLeft || !Main.LocalPlayer.CanAfford(awesomePrice, -1))
+            if (!Main.mouseLeftRelease || !Main.mouseLeft || !Main.LocalPlayer.CanAfford(reforgePrice, -1))
             {
                 return;
             }
 
-            Main.LocalPlayer.BuyItem(awesomePrice, -1);
+            Main.LocalPlayer.BuyItem(reforgePrice, -1);
 
             bool favorited = _vanillaItemSlot.Item.favorited;
             int stack = _vanillaItemSlot.Item.stack;
 
             Item reforgeItem = new Item();
-
             reforgeItem.netDefaults(_vanillaItemSlot.Item.netID);
 
             //reforgeItem = reforgeItem.CloneWithModdedDataFrom(_vanillaItemSlot.Item);
@@ -160,10 +164,11 @@ namespace RandomStats
             #region ChatFeature
             // Chat Feature for if player low/highrolls (just added it in for fun)
 
-            // TODO - print is only to client, I assume it'd be more fun for it to print to server if playing MP
+            // TODO - For some reason, changing the chat to the Broadcast made it so it only prints min/low roll but it doesn't print max/high roll anymore (????)
 
             // TODO - I assume chat things should configurable
             //      bool for whether chat feature is enabled/disabled
+            //      a checkbox list of bools for which methods of obtaining item chat should print from (ex. Crafting, Reforging, Picking up) idk if this is actually possible to know tho
             //      the bottom x% for lowroll chat
             //      the top x% for highroll chat
             //      the minimum base damage weapon needs to print
@@ -193,22 +198,22 @@ namespace RandomStats
                 // Min roll chat
                 if (itemInst.randomStat <= lowerBound)
                 {
-                    Main.NewText($"{Main.LocalPlayer.name} hit rock bottom... [i/s1:{reforgeItem.type}] {tooltipFormatString}", Color.White);
+                    ChatHelper.BroadcastChatMessage(NetworkText.FromLiteral($"{Main.LocalPlayer.name} hit rock bottom... [i/s1:{reforgeItem.type}] {tooltipFormatString}"), Color.White);
                 }
                 // Max roll chat
                 else if (itemInst.randomStat == upperBound) // Since max roll is distinct, we don't add tolerance here
                 {
-                    Main.NewText($"{Main.LocalPlayer.name} hit the jackpot! [i/s1:{reforgeItem.type}] {tooltipFormatString}", Color.White);
+                    ChatHelper.BroadcastChatMessage(NetworkText.FromLiteral($"{Main.LocalPlayer.name} hit the jackpot! [i/s1:{reforgeItem.type}] {tooltipFormatString}"), Color.White);
                 }
                 // Low roll chat
                 else if (itemInst.randomStat > lowerBound && itemInst.randomStat <= lowRollBoundary)
                 {
-                    Main.NewText($"{Main.LocalPlayer.name} just lowrolled... [i/s1:{reforgeItem.type}] {tooltipFormatString}", Color.White);
+                    ChatHelper.BroadcastChatMessage(NetworkText.FromLiteral($"{Main.LocalPlayer.name} just lowrolled... [i/s1:{reforgeItem.type}] {tooltipFormatString}"), Color.White);
                 }
                 // High roll chat
                 else if (itemInst.randomStat >= highRollBoundary && itemInst.randomStat < upperBound)
                 {
-                    Main.NewText($"{Main.LocalPlayer.name} just highrolled! [i/s1:{reforgeItem.type}] {tooltipFormatString}", Color.White);
+                    ChatHelper.BroadcastChatMessage(NetworkText.FromLiteral($"{Main.LocalPlayer.name} just highrolled! [i/s1:{reforgeItem.type}] {tooltipFormatString}"), Color.White);
                 }
             }
             #endregion
