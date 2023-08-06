@@ -146,7 +146,72 @@ namespace RandomStats
             //reforgeItem = reforgeItem.CloneWithModdedDataFrom(_vanillaItemSlot.Item);
             reforgeItem = _vanillaItemSlot.Item.Clone();
 
-            // TODO - This is the main effect of this slot.
+            // TODO - Starting here is the part where stuff gets changed
+            //      Currently it's only designed for weapon with no regards for armor
+
+            // There's a bug where if you leave the item in the slot and close the game, the item will disappear (tested for normal goblin reforge slot and item properly drops back to player on relog)
+
+            GlobalInstancedItems itemInst = reforgeItem.GetGlobalItem<GlobalInstancedItems>();
+            reforgeItem.damage = reforgeItem.OriginalDamage;
+            // Reset randomStat to 0 before calling setup so it actually rerolls
+            itemInst.randomStat = 0;
+            itemInst.SetupRandomDamage(reforgeItem);
+
+            #region ChatFeature
+            // Chat Feature for if player low/highrolls (just added it in for fun)
+
+            // TODO - print is only to client, I assume it'd be more fun for it to print to server if playing MP
+
+            // TODO - I assume chat things should configurable
+            //      bool for whether chat feature is enabled/disabled
+            //      the bottom x% for lowroll chat
+            //      the top x% for highroll chat
+            //      the minimum base damage weapon needs to print
+            //      the minimum base armor needs to print (once that's implemented)
+
+            int rngMinValue = ModContent.GetInstance<RandomStatsConfig>().MinRandomVariance;
+            int rngMaxValue = ModContent.GetInstance<RandomStatsConfig>().MaxRandomVariance;
+
+            // Assuming rngMinValue and rngMaxValue are in percentage format
+            float lowerBound = rngMinValue / 100f;
+            float upperBound = rngMaxValue / 100f;
+
+            // Calculate the potential min/max damage
+            int minDamage = (int)(reforgeItem.OriginalDamage * lowerBound);
+            int maxDamage = (int)(reforgeItem.OriginalDamage * upperBound);
+            int actualDamage = (int)(reforgeItem.damage * itemInst.randomStat);
+
+            // Calculate differences for low/highroll (bottom 5% and top 5%)
+            float lowRollBoundary = lowerBound + 0.05f * (upperBound - lowerBound);
+            float highRollBoundary = upperBound - 0.05f * (upperBound - lowerBound);
+
+            string tooltipFormatString = $"{actualDamage} [{minDamage} - {maxDamage}]";
+
+            // Only says chat for weapon above certain attack (to prevent spam chat)
+            if (reforgeItem.damage >= 15)
+            {
+                // Min roll chat
+                if (itemInst.randomStat <= lowerBound)
+                {
+                    Main.NewText($"{Main.LocalPlayer.name} hit rock bottom... [i/s1:{reforgeItem.type}] {tooltipFormatString}", Color.White);
+                }
+                // Max roll chat
+                else if (itemInst.randomStat == upperBound) // Since max roll is distinct, we don't add tolerance here
+                {
+                    Main.NewText($"{Main.LocalPlayer.name} hit the jackpot! [i/s1:{reforgeItem.type}] {tooltipFormatString}", Color.White);
+                }
+                // Low roll chat
+                else if (itemInst.randomStat > lowerBound && itemInst.randomStat <= lowRollBoundary)
+                {
+                    Main.NewText($"{Main.LocalPlayer.name} just lowrolled... [i/s1:{reforgeItem.type}] {tooltipFormatString}", Color.White);
+                }
+                // High roll chat
+                else if (itemInst.randomStat >= highRollBoundary && itemInst.randomStat < upperBound)
+                {
+                    Main.NewText($"{Main.LocalPlayer.name} just highrolled! [i/s1:{reforgeItem.type}] {tooltipFormatString}", Color.White);
+                }
+            }
+            #endregion
 
             _vanillaItemSlot.Item = reforgeItem.Clone();
             _vanillaItemSlot.Item.position.X = Main.LocalPlayer.position.X + (float)(Main.LocalPlayer.width / 2) - (float)(_vanillaItemSlot.Item.width / 2);
