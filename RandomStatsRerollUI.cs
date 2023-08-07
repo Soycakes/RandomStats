@@ -11,6 +11,8 @@ using Terraria;
 using Terraria.UI;
 using Terraria.UI.Chat;
 using Terraria.Chat;
+using System;
+using System.IO;
 
 namespace RandomStats
 {
@@ -26,7 +28,9 @@ namespace RandomStats
                 Top = { Pixels = 370 },
 
                 // TODO - Change valid item here later for "Random Stats" valid items
-                ValidItemFunc = item => item.IsAir || !item.IsAir// && item.Prefix(-3)
+                ValidItemFunc = item => item.IsAir ||
+                    (item.damage > 0 && item.maxStack == 1) || // Weapon / Accessory (with damage)
+                    (item.headSlot > 0 || item.bodySlot > 0 || item.legSlot > 0) // Armor
             };
 
             // Here we limit the items that can be placed in the slot. We are fine with placing an empty item in or a non-empty item that can be prefixed. Calling Prefix(-3) is the way to know if the item in question can take a prefix or not.
@@ -93,16 +97,25 @@ namespace RandomStats
             }
 
             // TODO - Implement configurable option to set reforge price of sellprice * scale
-            int reforgePrice = _vanillaItemSlot.Item.value;
+
+            // Item's value is 5x of sellprice
+            // Similar to goblin reforge price being changed depending on how good the modifier is, this price changes based on previous randomStat
+            // 30 should be replaced with config value
+            // ternary just incase randomStat is 0 (not sure in which case this can happen tho) so price isn't free
+            double randomStat = _vanillaItemSlot.Item.GetGlobalItem<GlobalInstancedItems>().randomStat;
+            int reforgePrice = (int)(_vanillaItemSlot.Item.value / 5 * 30 * (randomStat == 0 ? 1 : randomStat));
+
             string costText = Language.GetTextValue("LegacyInterface.46") + ": ";
             int[] coins = Utils.CoinsSplit(reforgePrice);
             var coinsText = new StringBuilder();
+
+            Color[] coinColors = new Color[] { Colors.CoinCopper, Colors.CoinSilver, Colors.CoinGold, Colors.CoinPlatinum };
 
             for (int i = 0; i < 4; i++)
             {
                 if (coins[3 - i] != 0)
                 {
-                    coinsText.Append($"[c/{Colors.AlphaDarken(Colors.CoinPlatinum).Hex3()}:{coins[3 - i]} {Language.GetTextValue($"LegacyInterface.{15 + i}")}]");
+                    coinsText.Append($"[c/{Colors.AlphaDarken(coinColors[3 - i]).Hex3()}:{coins[3 - i]} {Language.GetTextValue($"LegacyInterface.{15 + i}")}]");
                 }
             }
 
@@ -146,20 +159,22 @@ namespace RandomStats
 
             Item reforgeItem = new Item();
             reforgeItem.netDefaults(_vanillaItemSlot.Item.netID);
-
-            //reforgeItem = reforgeItem.CloneWithModdedDataFrom(_vanillaItemSlot.Item);
             reforgeItem = _vanillaItemSlot.Item.Clone();
 
-            // TODO - Starting here is the part where stuff gets changed
+            // TODO - Starting here is the part where item gets changed
             //      Currently it's only designed for weapon with no regards for armor
 
             // There's a bug where if you leave the item in the slot and close the game, the item will disappear (tested for normal goblin reforge slot and item properly drops back to player on relog)
 
             GlobalInstancedItems itemInst = reforgeItem.GetGlobalItem<GlobalInstancedItems>();
             reforgeItem.damage = reforgeItem.OriginalDamage;
+            reforgeItem.defense = reforgeItem.OriginalDefense;
+
             // Reset randomStat to 0 before calling setup so it actually rerolls
             itemInst.randomStat = 0;
+
             itemInst.SetupRandomDamage(reforgeItem);
+            itemInst.SetupArmorDefense(reforgeItem);
 
             #region ChatFeature
             // Chat Feature for if player low/highrolls (just added it in for fun)
@@ -172,49 +187,100 @@ namespace RandomStats
             //      the bottom x% for lowroll chat
             //      the top x% for highroll chat
             //      the minimum base damage weapon needs to print
-            //      the minimum base armor needs to print (once that's implemented)
+            //      the minimum base armor needs to print
 
-            int rngMinValue = ModContent.GetInstance<RandomStatsConfig>().MinRandomVariance;
-            int rngMaxValue = ModContent.GetInstance<RandomStatsConfig>().MaxRandomVariance;
+            float lowerBound = ModContent.GetInstance<RandomStatsConfig>().MinRandomVariance / 100f;
+            float upperBound = ModContent.GetInstance<RandomStatsConfig>().MaxRandomVariance / 100f;
 
-            // Assuming rngMinValue and rngMaxValue are in percentage format
-            float lowerBound = rngMinValue / 100f;
-            float upperBound = rngMaxValue / 100f;
-
-            // Calculate the potential min/max damage
-            int minDamage = (int)(reforgeItem.OriginalDamage * lowerBound);
-            int maxDamage = (int)(reforgeItem.OriginalDamage * upperBound);
-            int actualDamage = (int)(reforgeItem.damage * itemInst.randomStat);
+            // Calculate the min/max/actual stats
+            int minDamage = (int)(reforgeItem.OriginalDamage * (float)lowerBound);
+            int maxDamage = (int)(reforgeItem.OriginalDamage * (float)upperBound);
+            int actualDamage = (int)(reforgeItem.damage * (float)itemInst.randomStat);
+            int minDefense = (int)(reforgeItem.OriginalDefense * (float)lowerBound);
+            int maxDefense = (int)(reforgeItem.OriginalDefense * (float)upperBound);
+            int actualDefense = (int)(reforgeItem.defense);// * (float)itemInst.randomStat);
 
             // Calculate differences for low/highroll (bottom 5% and top 5%)
             float lowRollBoundary = lowerBound + 0.05f * (upperBound - lowerBound);
             float highRollBoundary = upperBound - 0.05f * (upperBound - lowerBound);
 
-            string tooltipFormatString = $"{actualDamage} [{minDamage} - {maxDamage}]";
-
-            // Only says chat for weapon above certain attack (to prevent spam chat)
-            if (reforgeItem.damage >= 15)
+            string tooltipFormatString;
+            int chatType = 0; // 1 - Min, 2 - Max, 3 - Low roll, 4 - High roll
+            
+            // this is an ugly way of doing this but I'm lazy to think of a better way
+            if ((reforgeItem.damage > 0 && reforgeItem.maxStack == 1))
             {
+                tooltipFormatString = $"{actualDamage} [{minDamage} - {maxDamage}]";
+
+                // Only says chat for items above certain stats (to prevent spam chat)
+                if (reforgeItem.damage >= 15)
+                {
+                    if (actualDamage == minDamage)
+                    {
+                        chatType = 1;
+                    }
+                    else if (actualDamage == maxDamage)
+                    {
+                        chatType = 2;
+                    }
+                    else if (itemInst.randomStat > lowerBound && itemInst.randomStat <= lowRollBoundary)
+                    {
+                        chatType = 3;
+                    }
+                    else if (itemInst.randomStat >= highRollBoundary && itemInst.randomStat < upperBound)
+                    {
+                        chatType = 4;
+                    }
+                }
+            }
+            else
+            {
+                tooltipFormatString = $"{actualDefense} [{minDefense} - {maxDefense}]";
+
+                // Only says chat for items above certain stats (to prevent spam chat)
+                if (reforgeItem.defense >= 5)
+                {
+                    if (actualDefense == minDefense)
+                    {
+                        chatType = 1;
+                    }
+                    else if (actualDefense == maxDefense)
+                    {
+                        chatType = 2;
+                    }
+                    else if (itemInst.randomStat > lowerBound && itemInst.randomStat <= lowRollBoundary)
+                    {
+                        chatType = 3;
+                    }
+                    else if (itemInst.randomStat >= highRollBoundary && itemInst.randomStat < upperBound)
+                    {
+                        chatType = 4;
+                    }
+                }
+            }
+
+            switch (chatType)
+            {
+                case 0:
+                    // Uncomment this to print everything for testing
+                    //ChatHelper.BroadcastChatMessage(NetworkText.FromLiteral($"{Main.LocalPlayer.name} [i/s1:{reforgeItem.type}] {tooltipFormatString}"), Color.Red);
+                    break;
                 // Min roll chat
-                if (itemInst.randomStat <= lowerBound)
-                {
+                case 1:
                     ChatHelper.BroadcastChatMessage(NetworkText.FromLiteral($"{Main.LocalPlayer.name} hit rock bottom... [i/s1:{reforgeItem.type}] {tooltipFormatString}"), Color.White);
-                }
+                    break;
                 // Max roll chat
-                else if (itemInst.randomStat == upperBound) // Since max roll is distinct, we don't add tolerance here
-                {
+                case 2:
                     ChatHelper.BroadcastChatMessage(NetworkText.FromLiteral($"{Main.LocalPlayer.name} hit the jackpot! [i/s1:{reforgeItem.type}] {tooltipFormatString}"), Color.White);
-                }
+                    break;
                 // Low roll chat
-                else if (itemInst.randomStat > lowerBound && itemInst.randomStat <= lowRollBoundary)
-                {
+                case 3:
                     ChatHelper.BroadcastChatMessage(NetworkText.FromLiteral($"{Main.LocalPlayer.name} just lowrolled... [i/s1:{reforgeItem.type}] {tooltipFormatString}"), Color.White);
-                }
+                    break;
                 // High roll chat
-                else if (itemInst.randomStat >= highRollBoundary && itemInst.randomStat < upperBound)
-                {
+                case 4:
                     ChatHelper.BroadcastChatMessage(NetworkText.FromLiteral($"{Main.LocalPlayer.name} just highrolled! [i/s1:{reforgeItem.type}] {tooltipFormatString}"), Color.White);
-                }
+                    break;
             }
             #endregion
 

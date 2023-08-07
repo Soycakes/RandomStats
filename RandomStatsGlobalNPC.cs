@@ -16,7 +16,6 @@ namespace RandomStats
             if (!firstButton)// && Main.npcChatText == "Reforge")
             {
                 RandomStats.RandomStatsUserInterface.SetState(RandomStats.RerollUI);
-                RandomStats.Instance.ShowRerollUI();
             }
         }
     }

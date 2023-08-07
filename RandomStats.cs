@@ -32,11 +32,6 @@ namespace RandomStats
             RerollUI = null;
             RandomStatsUserInterface = null;
         }
-
-        public void ShowRerollUI()
-        {
-            RandomStatsUserInterface.SetState(RerollUI);
-        }
     }
 
     // Thank you chatGPT for this one - Soycake
